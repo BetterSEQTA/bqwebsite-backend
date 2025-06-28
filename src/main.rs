@@ -1,6 +1,7 @@
 use axum::{
-    Router
+    Router,
 };
+
 
 use tower_http::trace::{TraceLayer};
 use tower::ServiceBuilder;
@@ -15,12 +16,13 @@ use crate::api::api_router;
 
 #[tokio::main]
 async fn main() {
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().pretty())
         .init();
 
     // build our application with a single route
-    let app = Router::new().nest("/api", api_router()).layer(
+    let app = Router::new().nest("/api", api_router().await).layer(
         ServiceBuilder::new()
             .layer(TraceLayer::new_for_http())
     );
