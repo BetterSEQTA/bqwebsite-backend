@@ -26,3 +26,5 @@ target/
 /target
 .env*
 nginx/
+
+postgres-data
