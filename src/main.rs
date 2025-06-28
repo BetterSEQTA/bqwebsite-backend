@@ -1,34 +1,28 @@
 use axum::{
-    routing::get,
-    routing::post,
-    Router,
-    http::{ Method, HeaderValue }
+    Router
 };
 
-use tower::{ ServiceBuilder };
-use tower_http::{
-    cors::{ CorsLayer },
-    compression::{ CompressionLayer }
+use tower_http::trace::{TraceLayer};
+use tower::ServiceBuilder;
+
+use tracing_subscriber::{
+    layer::SubscriberExt, 
+    util::SubscriberInitExt
 };
 
-pub mod auth;
+mod api;
+use crate::api::api_router;
 
 #[tokio::main]
 async fn main() {
-    let allowed_origin = "https://accounts.betterseqta.org"
-        .parse::<HeaderValue>()
-        .expect("Failed to parse allowed origin");
-
-    let cors = CorsLayer::new().allow_origin(allowed_origin)
-        .allow_methods(Method::POST);
-
-    let compression = CompressionLayer::new().br(true).quality(tower_http::CompressionLevel::Fastest);
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().pretty())
+        .init();
 
     // build our application with a single route
-    let app = Router::new().route("/api/login", post(auth::login)).layer(
+    let app = Router::new().nest("/api", api_router()).layer(
         ServiceBuilder::new()
-            .layer(cors)
-            .layer(compression),
+            .layer(TraceLayer::new_for_http())
     );
 
     // run our app with hyper, listening globally on port 3000
