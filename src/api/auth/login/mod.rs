@@ -41,7 +41,7 @@ pub async fn login(State(state): State<PgPool>) -> Json<Vec<User>> {
             userid,
             email,
             password,
-            provider::TEXT as "provider: _", 
+            provider::TEXT as "provider: Provider",
             "providerId" as provider_id,
             username,
             "displayName" as display_name,
