@@ -5,15 +5,13 @@ use axum::{
 };
 use dotenvy::dotenv;
 
-use std::sync::Arc;
-
 use tower::{ ServiceBuilder };
 
 
 mod auth;
 mod health;
 
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions};
 use std::env;
 
 

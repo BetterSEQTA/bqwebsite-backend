@@ -1,7 +1,7 @@
 use ::chrono::Utc;
-use sqlx::{postgres::{PgQueryResult, PgRow}, types::chrono, Executor, PgPool};
+use sqlx::{types::chrono, PgPool};
 
-use axum::{extract::State, handler::Handler, http::StatusCode, Error, Json, response::{IntoResponse, Response}, body::Body };
+use axum::{extract::State, http::StatusCode, Json, response::{Response}, body::Body };
 use uuid::Uuid;
 
 use serde::{Serialize, Deserialize};
@@ -9,13 +9,13 @@ use serde_json::Value;
 
 use argon2::{
     password_hash::{
-        rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, Salt, SaltString
+        PasswordHash, PasswordVerifier
     },
     Argon2
 };
 
-use jsonwebtoken::{encode, Header, EncodingKey, Algorithm};
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
+use jsonwebtoken::{ Header, EncodingKey };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::env;
 
