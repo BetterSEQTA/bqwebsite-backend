@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            password,\n            salt,\n            userid,\n            email,\n            username\n        FROM users\n        WHERE email = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "password",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "salt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "userid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "username",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0ddc0a4ece0d879c442df8d2646614287f6c8222f8f780ad1fb535ca2477e8b3"
+}
