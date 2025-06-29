@@ -1,7 +1,7 @@
 use ::chrono::Utc;
 use sqlx::{types::chrono, PgPool};
 
-use axum::{extract::State, http::StatusCode, Json, response::{Response}, body::Body };
+use axum::{body::Body, extract::State, http::{StatusCode}, response::{IntoResponse}, Json };
 use uuid::Uuid;
 
 use serde::{Serialize, Deserialize};
@@ -9,15 +9,19 @@ use serde_json::Value;
 
 use argon2::{
     password_hash::{
-        PasswordHash, PasswordVerifier
+        PasswordHash, PasswordHasher, PasswordVerifier, Salt, SaltString
     },
     Argon2
 };
+
+use sha2::Sha256;
+use hmac::{Hmac, Mac};
 
 use jsonwebtoken::{ Header, EncodingKey };
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::env;
+
 
 #[derive(Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "provider")] // Use your actual Postgres enum name here
@@ -42,8 +46,7 @@ pub struct User {
     #[serde(rename = "pfpUrl")]
     pfp_url: Option<String>,
     #[serde(rename = "createdAt")]
-    created_at: Option<chrono::DateTime<Utc>>,
-    salt: Option<String>
+    created_at: Option<chrono::DateTime<Utc>>
 
 }
 
@@ -57,14 +60,20 @@ pub struct Token {
 }
 
 
-pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> Response {
-    let email = payload["email"].as_str().unwrap();
-    let password = payload["password"].as_str().unwrap();
-    let users = sqlx::query!(
+pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
+    let email = match payload.get("email").and_then(|v| v.as_str()) {
+        Some(e) => e,
+        None => return (StatusCode::BAD_REQUEST, "Missing email").into_response(),
+    };
+    let password = match payload.get("password").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return (StatusCode::BAD_REQUEST, "Missing password").into_response(),
+    };
+
+    let user = match sqlx::query!(
         r#"
         SELECT
             password,
-            salt,
             userid,
             email,
             username
@@ -73,57 +82,97 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> R
         "#,
         email
     )
-    .fetch_all(&state)
+    .fetch_optional(&state)
     .await
-    .expect("Login malfunctioned");
+    {
+        Ok(Some(user)) => user,
+        Ok(None) => return (StatusCode::UNAUTHORIZED, "Invalid email or password").into_response(),
+        Err(e) => {
+            println!("Database fetch error occurred: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+        }
+    };
+
+    let argon2 = Argon2::default(); // Initialise argon2.
 
 
-    if users.iter().len() > 0 {
-        let user = users.first().expect("Something went wrong. User doesn't exist??");
+    let parsed_hash = match PasswordHash::new(&user.password) {
+        Ok(hash) => hash,
+        Err(e) => {
+            println!("Error parsing hash: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+        }
+    };
 
-        let argon2 = Argon2::default();
+    let pepper = match env::var("PEPPER") {
+        Ok(pep) => pep,
+        Err(e) => {
+            println!("Pepper error occurred: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+        }
+    };
 
-        let parsed_hash = PasswordHash::new(&user.password).expect("Unable to parse stored password hash");
+    let mut mac = match Hmac::<Sha256>::new_from_slice(&pepper.as_bytes()) {
+        Ok(hmac_hash) => hmac_hash,
+        Err(e) => {
+            println!("Error occurred creating the HMAC hash in login: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+        }
+    };
 
-        match argon2.verify_password(&password.as_bytes(), &parsed_hash) {
-            Ok(_) => {
+    mac.update(password.as_bytes());
+    let hmac_result = mac.finalize().into_bytes();
 
-                let now = SystemTime::now()
+    match argon2.verify_password(&hmac_result, &parsed_hash) {
+        Ok(_) => {
+
+            let now = match SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_secs() as usize;
+                    {
+                        Ok(t) => t.as_secs() as usize,
+                        Err(e) => {
+                            println!("Time went backwards!: {}", e);
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+                        }
+                    };
         
-                let expiration = now + 60 * 60 * 24 * 7; // Token valid for 7 days
+            let expiration = now + 60 * 60 * 24 * 7; // Token valid for 7 days
         
 
-                let claims = Token {
+            let claims = Token {
                     sub: user.userid.to_string(),
                     exp: expiration,
                     iat: now,
                     username: user.username.to_string(),
                     email: user.email.to_string()
-                };
+            };
 
-                let key = env::var("JWT_KEY").expect("No JWT signing secret found");
+            let key = match env::var("JWT_KEY") {
+                Ok(jwt) => jwt,
+                Err(e) => {
+                    println!("No JWT signing secret found: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+                }
+            };
 
-                let token = jsonwebtoken::encode(&Header::default(), &claims, &EncodingKey::from_secret(&key.as_ref())).expect("JWT unable to be created");
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::from(Json(token).to_string()))
-                    .unwrap()
-            },
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .body(Body::from(Json(String::from("Invalid email or password")).to_string()))
-                    .unwrap()
-            }
-        };
-    }
+            let token = match jsonwebtoken::encode(&Header::default(), &claims, &EncodingKey::from_secret(&key.as_ref())) {
+                Ok(tok) => tok,
+                Err(e) => {
+                    println!("JWT unable to be created: {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+                }
+            };
 
-    
-    Response::builder()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .body(Body::from(Json(String::from("Invalid email or password")).to_string()))
-                    .unwrap()
+            return (
+                StatusCode::OK,
+                Body::from(Json(token).to_string())
+            ).into_response()
+        }
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Body::from(Json(String::from("Invalid email or password")).to_string())
+            ).into_response()
+        }
+    };
 }
