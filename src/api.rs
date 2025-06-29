@@ -20,7 +20,7 @@ use std::env;
 
 pub async fn api_router() -> Router {
     let _ = dotenv().ok();
-    let postgres_connection = env::var("POSTGRES_URI").expect("No PostgreSQL uri found");
+    let postgres_connection = env::var("DATABASE_URL").expect("No PostgreSQL uri found");
 
     let pool = PgPoolOptions::new()
         .max_connections(10)

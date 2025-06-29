@@ -27,4 +27,4 @@ services:
       - 3000:3000
     environment:
       RUST_BACKTRACE: 1
-    env_file: ./.env
+    env_file: ./.env.development
