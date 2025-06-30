@@ -28,7 +28,7 @@ use crate::types::Token;
 
 
 pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
-    crate::statics::initialize_env();
+
 
     let email = match payload.get("email").and_then(|v| v.as_str()) {
         Some(e) => e,

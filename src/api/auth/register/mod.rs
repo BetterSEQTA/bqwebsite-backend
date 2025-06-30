@@ -31,7 +31,7 @@ fn is_unique_violation(e: &sqlx::Error) -> bool {
 }
 
 pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
-    crate::statics::initialize_env();
+    
     let email = match payload.get("email").and_then(|v| v.as_str()) {
         Some(e) => clean(e),
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing email"}))).into_response(),

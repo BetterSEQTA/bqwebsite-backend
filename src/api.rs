@@ -16,7 +16,6 @@ use std::env;
 
 
 pub async fn api_router() -> Router {
-    crate::statics::initialize_env();
 
     let postgres_connection = env::var("DATABASE_URL").expect("No PostgreSQL uri found");
 
