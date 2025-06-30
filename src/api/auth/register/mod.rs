@@ -26,29 +26,72 @@ use crate::{responses::throw_internal_server_error, types::Provider};
 
 use ammonia::clean;
 
-fn is_unique_violation(e: &sqlx::Error) -> bool {
-    matches!(e, sqlx::Error::Database(db_err) if db_err.code() == Some(std::borrow::Cow::Borrowed("23505")))
-}
+const USERNAME_MIN_LEN: usize = 3;
+const USERNAME_MAX_LEN: usize = 32;
+
+const EMAIL_MIN_LEN: usize = 5;
+const EMAIL_MAX_LEN: usize = 320;
+
+const PASSWORD_MIN_LEN: usize = 8;
+const PASSWORD_MAX_LEN: usize = 128;
 
 pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
-    
+    let email_regex = match regex::Regex::new(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)") {
+        Ok(r) => r,
+        Err(e) => {
+            println!("Something went wrong with email regex!: {}", e);
+            return throw_internal_server_error().await;
+        }
+    };
+
+
     let email = match payload.get("email").and_then(|v| v.as_str()) {
-        Some(e) => clean(e),
+        Some(e) => {
+            if (e.len() < EMAIL_MIN_LEN || e.len() > EMAIL_MAX_LEN) || !email_regex.is_match(e) {
+            return (StatusCode::BAD_REQUEST, 
+                    Json(json!({"status": 400, "message": "Email not between 5 and 320 characters or not formatted correctly."})))
+                  .into_response();
+            }
+            e
+        },
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing email"}))).into_response(),
     };
 
     let password = match payload.get("password").and_then(|v| v.as_str()) {
-        Some(e) => e,
+        Some(e) => {
+            if e.len() < PASSWORD_MIN_LEN || e.len() > PASSWORD_MAX_LEN {
+            return (StatusCode::BAD_REQUEST, 
+                    Json(json!({"status": 400, "message": "Password not between 8 and 128 characters"})))
+                  .into_response();
+            }
+            e
+        },
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing password"}))).into_response(),
     };
 
     let username = match payload.get("username").and_then(|v| v.as_str()) {
-        Some(e) => clean(e),
+        Some(e) => {
+            let tex = clean(e);
+            if tex.len() < USERNAME_MIN_LEN || tex.len() > USERNAME_MAX_LEN {
+            return (StatusCode::BAD_REQUEST, 
+                    Json(json!({"status": 400, "message": "Username not within 3 and 32 characters"})))
+                  .into_response();
+            }
+            tex
+        }
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing username"}))).into_response(),
     };
 
     let display_name = match payload.get("displayName").and_then(|v| v.as_str()) {
-        Some(e) => clean(e),
+        Some(e) => {
+            let tex = clean(e);
+            if tex.len() < USERNAME_MIN_LEN || tex.len() > USERNAME_MAX_LEN {
+            return (StatusCode::BAD_REQUEST, 
+                    Json(json!({"status": 400, "message": "Display name not within 3 and 32 characters"})))
+                  .into_response();
+            }
+            tex
+        },
         None => username.clone()
     };
 
@@ -90,7 +133,8 @@ pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -
     match sqlx::query(
         r#"
         INSERT INTO users (email, username, password, "displayName", userid, "createdAt", provider, "providerId")
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT DO NOTHING;
         "#
     ).bind(&email)
     .bind(&username)
@@ -103,10 +147,6 @@ pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -
     .execute(&state)
     .await {
         Ok(_) => return (StatusCode::OK, Json(json!({"status": 200, "message": "If this email or username is available, an account has been created"}))).into_response(),
-        Err(e) if is_unique_violation(&e) => {
-            println!("Tried to create duplicate user!: {}", e);
-            return (StatusCode::OK, Json(json!({"status": 200, "message": "If this email or username is available, an account has been created"}))).into_response();
-        }
         Err(e) => {
             println!("Error creating a new user in db: {}", e);
             return throw_internal_server_error().await;
