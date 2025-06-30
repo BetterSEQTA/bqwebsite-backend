@@ -22,6 +22,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::env;
 
+use serde_json::json;
+
+use crate::responses::throw_internal_server_error;
 
 #[derive(Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "provider")] // Use your actual Postgres enum name here
@@ -63,11 +66,11 @@ pub struct Token {
 pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
     let email = match payload.get("email").and_then(|v| v.as_str()) {
         Some(e) => e,
-        None => return (StatusCode::BAD_REQUEST, "Missing email").into_response(),
+        None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing email"}))).into_response(),
     };
     let password = match payload.get("password").and_then(|v| v.as_str()) {
         Some(p) => p,
-        None => return (StatusCode::BAD_REQUEST, "Missing password").into_response(),
+        None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing password"}))).into_response(),
     };
 
     let user = match sqlx::query!(
@@ -86,10 +89,15 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
     .await
     {
         Ok(Some(user)) => user,
-        Ok(None) => return (StatusCode::UNAUTHORIZED, "Invalid email or password").into_response(),
+        Ok(None) => return (StatusCode::UNAUTHORIZED, 
+                            Json(json!({
+                                "status": 401,
+                                "message": "Invalid email or password"
+                            })))
+                    .into_response(),
         Err(e) => {
             println!("Database fetch error occurred: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+            return throw_internal_server_error();
         }
     };
 
@@ -100,7 +108,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
         Ok(hash) => hash,
         Err(e) => {
             println!("Error parsing hash: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+            return throw_internal_server_error();
         }
     };
 
@@ -108,7 +116,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
         Ok(pep) => pep,
         Err(e) => {
             println!("Pepper error occurred: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+            return throw_internal_server_error();
         }
     };
 
@@ -116,7 +124,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
         Ok(hmac_hash) => hmac_hash,
         Err(e) => {
             println!("Error occurred creating the HMAC hash in login: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+            return throw_internal_server_error();
         }
     };
 
@@ -132,7 +140,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
                         Ok(t) => t.as_secs() as usize,
                         Err(e) => {
                             println!("Time went backwards!: {}", e);
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+                            return throw_internal_server_error();
                         }
                     };
         
@@ -151,7 +159,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
                 Ok(jwt) => jwt,
                 Err(e) => {
                     println!("No JWT signing secret found: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+                    return throw_internal_server_error();
                 }
             };
 
@@ -159,19 +167,22 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
                 Ok(tok) => tok,
                 Err(e) => {
                     println!("JWT unable to be created: {}", e);
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+                    return throw_internal_server_error();
                 }
             };
 
             return (
                 StatusCode::OK,
-                Body::from(Json(token).to_string())
+                Json(json!({"status": 200, "token": token}))
             ).into_response()
         }
         Err(_) => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Body::from(Json(String::from("Invalid email or password")).to_string())
+                Json(json!({
+                    "status": 401,
+                    "message": "Invalid email or password"
+                }))
             ).into_response()
         }
     };

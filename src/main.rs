@@ -14,6 +14,8 @@ use tracing_subscriber::{
 mod api;
 use crate::api::api_router;
 
+mod responses;
+
 #[tokio::main]
 async fn main() {
 
