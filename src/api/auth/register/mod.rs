@@ -52,7 +52,7 @@ pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -
                     Json(json!({"status": 400, "message": "Email not between 5 and 320 characters or not formatted correctly."})))
                   .into_response();
             }
-            e
+            e.to_lowercase()
         },
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing email"}))).into_response(),
     };
@@ -77,7 +77,7 @@ pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -
                     Json(json!({"status": 400, "message": "Username not within 3 and 32 characters"})))
                   .into_response();
             }
-            tex
+            tex.to_lowercase()
         }
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing username"}))).into_response(),
     };
