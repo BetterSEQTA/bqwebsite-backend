@@ -3,7 +3,6 @@ use axum::{
     routing::post,
     Router,
 };
-use dotenvy::dotenv;
 
 use tower::{ ServiceBuilder };
 
@@ -17,7 +16,8 @@ use std::env;
 
 
 pub async fn api_router() -> Router {
-    let _ = dotenv().ok();
+    crate::statics::initialize_env();
+
     let postgres_connection = env::var("DATABASE_URL").expect("No PostgreSQL uri found");
 
     let pool = PgPoolOptions::new()

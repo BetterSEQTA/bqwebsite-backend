@@ -12,13 +12,16 @@ use tracing_subscriber::{
 };
 
 mod api;
-use crate::api::api_router;
+use crate::{api::api_router, statics::initialize_env};
 
 mod responses;
 mod types;
 
+mod statics;
+
 #[tokio::main]
 async fn main() {
+    initialize_env();
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().pretty())

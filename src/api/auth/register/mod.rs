@@ -1,5 +1,4 @@
 use ::chrono::{DateTime, Utc};
-use dotenvy::dotenv;
 use sqlx::{PgPool};
 
 use axum::{extract::State, http::{StatusCode}, response::{IntoResponse}, Json };
@@ -32,14 +31,14 @@ fn is_unique_violation(e: &sqlx::Error) -> bool {
 }
 
 pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
-    let _ = dotenv();
+    crate::statics::initialize_env();
     let email = match payload.get("email").and_then(|v| v.as_str()) {
         Some(e) => clean(e),
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing email"}))).into_response(),
     };
 
     let password = match payload.get("password").and_then(|v| v.as_str()) {
-        Some(e) => clean(e),
+        Some(e) => e,
         None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing password"}))).into_response(),
     };
 
@@ -91,7 +90,7 @@ pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -
     match sqlx::query(
         r#"
         INSERT INTO users (email, username, password, "displayName", userid, "createdAt", provider, "providerId")
-        VALUES ($1, $2, $3, $4, $5, $6, $7);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
         "#
     ).bind(&email)
     .bind(&username)
