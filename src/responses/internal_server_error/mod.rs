@@ -2,7 +2,7 @@ use axum::{body::Body, http::{Response, StatusCode}, response::IntoResponse, Jso
 
 use serde_json::{json};
 
-pub fn throw_internal_server_error() -> Response<Body> {
+pub async fn throw_internal_server_error() -> Response<Body> {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({

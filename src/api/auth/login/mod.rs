@@ -26,41 +26,7 @@ use serde_json::json;
 
 use crate::responses::throw_internal_server_error;
 
-#[derive(Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "provider")] // Use your actual Postgres enum name here
-#[sqlx(rename_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub enum Provider {
-    Discord,
-    Credentials
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct User {
-    userid: Option<Uuid>,
-    email: Option<String>,
-    password: Option<String>,
-    provider: Option<Provider>,
-    #[serde(rename = "providerId")]
-    provider_id: Option<String>,
-    username: Option<String>,
-    #[serde(rename = "displayName")]
-    display_name: Option<String>,
-    #[serde(rename = "pfpUrl")]
-    pfp_url: Option<String>,
-    #[serde(rename = "createdAt")]
-    created_at: Option<chrono::DateTime<Utc>>
-
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Token {
-    sub: String,
-    exp: usize,
-    iat: usize,
-    username: String,
-    email: String
-}
+use crate::types::{User, Token};
 
 
 pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
@@ -97,7 +63,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
                     .into_response(),
         Err(e) => {
             println!("Database fetch error occurred: {}", e);
-            return throw_internal_server_error();
+            return throw_internal_server_error().await;
         }
     };
 
@@ -108,7 +74,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
         Ok(hash) => hash,
         Err(e) => {
             println!("Error parsing hash: {}", e);
-            return throw_internal_server_error();
+            return throw_internal_server_error().await;
         }
     };
 
@@ -116,7 +82,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
         Ok(pep) => pep,
         Err(e) => {
             println!("Pepper error occurred: {}", e);
-            return throw_internal_server_error();
+            return throw_internal_server_error().await;
         }
     };
 
@@ -124,7 +90,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
         Ok(hmac_hash) => hmac_hash,
         Err(e) => {
             println!("Error occurred creating the HMAC hash in login: {}", e);
-            return throw_internal_server_error();
+            return throw_internal_server_error().await;
         }
     };
 
@@ -140,7 +106,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
                         Ok(t) => t.as_secs() as usize,
                         Err(e) => {
                             println!("Time went backwards!: {}", e);
-                            return throw_internal_server_error();
+                            return throw_internal_server_error().await;
                         }
                     };
         
@@ -159,7 +125,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
                 Ok(jwt) => jwt,
                 Err(e) => {
                     println!("No JWT signing secret found: {}", e);
-                    return throw_internal_server_error();
+                    return throw_internal_server_error().await;
                 }
             };
 
@@ -167,7 +133,7 @@ pub async fn login(State(state): State<PgPool>, Json(payload): Json<Value>) -> i
                 Ok(tok) => tok,
                 Err(e) => {
                     println!("JWT unable to be created: {}", e);
-                    return throw_internal_server_error();
+                    return throw_internal_server_error().await;
                 }
             };
 

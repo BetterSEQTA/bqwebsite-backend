@@ -15,6 +15,7 @@ mod api;
 use crate::api::api_router;
 
 mod responses;
+mod types;
 
 #[tokio::main]
 async fn main() {
