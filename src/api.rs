@@ -26,11 +26,11 @@ pub async fn api_router() -> Router {
     let shared_db = pool.expect("Unable to create shared state");
 
     Router::new()
-        .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
-        .route("/auth/register", post(auth::register))
         .route("/health", get(health::health))
+        .route("/auth/oauth/discord", get(auth::oauth::discord::define_event_handler))
+        .route("/auth/callback/discord", get(auth::callback::discord::exchange_code))
         .layer(
             ServiceBuilder::new()
         )

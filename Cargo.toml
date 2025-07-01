@@ -7,7 +7,7 @@ edition = "2024"
 argon2 = { version = "0.5.3", features = ["std"] }
 axum = { version = "0.8.4", features = ["multipart", "http2", "macros"] }
 jsonwebtoken = "9.3.1"
-tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.45.1", features = ["full"] }
 tower = "0.5.2"
 tower-http = { version = "0.6.6", features = [ "cors", "compression-br", "trace" ] }
 tracing = "0.1.41"
@@ -23,6 +23,8 @@ hex = "0.4.3"
 ammonia = "4.1.0"
 regex = "1.11.1"
 tower_governor = { version = "0.7.0", features = ["axum", "tracing"] }
+url = { version = "2.5.4", features = ["std", "serde"] }
+reqwest = { version = "0.12.21", features = ["json"] }
 
 [dependencies.uuid]
 version = "1.17.0"

@@ -1,3 +1,4 @@
+use chrono::{DateTime, SecondsFormat, TimeDelta};
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use sqlx::types::chrono::Utc;
@@ -5,26 +6,40 @@ use sqlx::types::chrono::Utc;
 #[derive(Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "provider", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
+#[derive(Debug)]
 pub enum Provider {
     Discord,
-    Credentials
+    Google,
+    Microsoft
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct User {
-    pub userid: Option<Uuid>,
-    pub email: Option<String>,
-    pub password: Option<String>,
-    pub provider: Option<Provider>,
+    pub userid: Uuid,
+    pub email: String,
+    pub provider: Provider,
+    #[serde(rename = "accessToken")]
+    pub access_token: String,
+
+    #[serde(rename = "refreshToken")]
+    pub refresh_token: String,
+
     #[serde(rename = "providerId")]
-    pub provider_id: Option<String>,
-    pub username: Option<String>,
+    pub provider_name: Option<String>,
+
+    pub username: String,
+
     #[serde(rename = "displayName")]
     pub display_name: Option<String>,
+
     #[serde(rename = "pfpUrl")]
     pub pfp_url: Option<String>,
+
     #[serde(rename = "createdAt")]
-    pub created_at: Option<chrono::DateTime<Utc>>
+    pub created_at: chrono::DateTime<Utc>,
+
+    #[serde(rename = "tokenExpiresAt")]
+    pub token_expires_at: Option<chrono::DateTime<Utc>>
 
 }
 
@@ -34,15 +49,31 @@ pub struct Token {
     pub exp: usize,
     pub iat: usize,
     pub username: String,
-    pub email: String
+    pub provider: Provider,
+    pub provider_id: String
 }
 
-#[derive(Deserialize)]
-pub struct RegisterPayload {
-    pub email: String,
-    pub password: String,
+#[derive(Debug, Deserialize)]
+pub struct DiscordCallbackQuery {
+    pub code: String,
+    pub state: Uuid
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DiscordAccessTokenResponse {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: Option<i64>,
+    pub refresh_token: String,
+    pub scope: String
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DiscordUser {
+    pub id: String,
     pub username: String,
-    #[serde(default)]
-    #[serde(rename = "displayName")]
-    pub display_name: Option<String>,
+    pub global_name: Option<String>,
+    pub email: Option<String>,
+    pub avatar: Option<String>,
+    pub verified: bool
 }
