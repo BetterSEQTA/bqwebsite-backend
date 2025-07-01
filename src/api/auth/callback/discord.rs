@@ -123,11 +123,10 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         me_json.global_name = Some(me_json.username.clone());
     }
 
-    if me_json.avatar.is_none() {
-        me_json.avatar = Some(format!("https://api.dicebear.com/7.x/thumbs/svg?seed={}", me_json.id));
-    } else {
-        me_json.avatar = Some(format!("https://cdn.discordapp.com/avatars/{}/{}.png", me_json.id, me_json.avatar.unwrap()));
-    }
+    me_json.avatar = Some(match me_json.avatar {
+        None => format!("https://api.dicebear.com/7.x/thumbs/svg?seed={}", me_json.id),
+        Some(avatar) => format!("https://cdn.discordapp.com/avatars/{}/{}.png", me_json.id, avatar)
+    });
 
     let provider = Provider::Discord;
 
