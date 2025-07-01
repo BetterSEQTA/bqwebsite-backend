@@ -22,7 +22,7 @@ use std::env;
 
 use serde_json::json;
 
-use crate::{responses::throw_internal_server_error, types::Provider};
+use crate::{responses::throw_internal_server_error, types::{Provider, RegisterPayload}};
 
 use ammonia::clean;
 
@@ -35,64 +35,42 @@ const EMAIL_MAX_LEN: usize = 320;
 const PASSWORD_MIN_LEN: usize = 8;
 const PASSWORD_MAX_LEN: usize = 128;
 
-pub async fn register(State(state): State<PgPool>, Json(payload): Json<Value>) -> impl IntoResponse {
-    let email_regex = match regex::Regex::new(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)") {
-        Ok(r) => r,
-        Err(e) => {
-            println!("Something went wrong with email regex!: {}", e);
-            return throw_internal_server_error().await;
-        }
-    };
+use crate::statics::{EMAIL_REGEX, USERNAME_REGEX};
+
+pub async fn register(State(state): State<PgPool>, Json(payload): Json<RegisterPayload>) -> impl IntoResponse {
+    let email_regex = EMAIL_REGEX.get().unwrap();
+    let username_regex = USERNAME_REGEX.get().unwrap();
 
 
-    let email = match payload.get("email").and_then(|v| v.as_str()) {
-        Some(e) => {
-            if (e.len() < EMAIL_MIN_LEN || e.len() > EMAIL_MAX_LEN) || !email_regex.is_match(e) {
-            return (StatusCode::BAD_REQUEST, 
-                    Json(json!({"status": 400, "message": "Email not between 5 and 320 characters or not formatted correctly."})))
-                  .into_response();
-            }
-            e.to_lowercase()
-        },
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing email"}))).into_response(),
-    };
 
-    let password = match payload.get("password").and_then(|v| v.as_str()) {
-        Some(e) => {
-            if e.len() < PASSWORD_MIN_LEN || e.len() > PASSWORD_MAX_LEN {
-            return (StatusCode::BAD_REQUEST, 
+    let email = payload.email.trim().to_lowercase();
+    if (email.len() < EMAIL_MIN_LEN || email.len() > EMAIL_MAX_LEN) || !email_regex.is_match(&email) {
+        return (StatusCode::BAD_REQUEST, 
+                Json(json!({"status": 400, "message": "Email not between 5 and 320 characters or not formatted correctly."})))
+                .into_response()
+    }
+
+    let password = payload.password;
+    if password.len() < PASSWORD_MIN_LEN || password.len() > PASSWORD_MAX_LEN {
+        return (StatusCode::BAD_REQUEST, 
                     Json(json!({"status": 400, "message": "Password not between 8 and 128 characters"})))
                   .into_response();
-            }
-            e
-        },
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing password"}))).into_response(),
     };
 
-    let username = match payload.get("username").and_then(|v| v.as_str()) {
-        Some(e) => {
-            let tex = clean(e);
-            if tex.len() < USERNAME_MIN_LEN || tex.len() > USERNAME_MAX_LEN {
-            return (StatusCode::BAD_REQUEST, 
-                    Json(json!({"status": 400, "message": "Username not within 3 and 32 characters"})))
-                  .into_response();
-            }
-            tex.to_lowercase()
-        }
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"status": 400, "message": "Missing username"}))).into_response(),
+    
+    let username = clean(&payload.username).trim().to_lowercase();
+    if (username.len() < USERNAME_MIN_LEN || username.len() > USERNAME_MAX_LEN) || !username_regex.is_match(&username) {
+        return (StatusCode::BAD_REQUEST, 
+            Json(json!({"status": 400, "message": "Username not within 3 and 32 characters or has invalid non-ASCII characters"})))
+            .into_response();
+        
     };
 
-    let display_name = match payload.get("displayName").and_then(|v| v.as_str()) {
-        Some(e) => {
-            let tex = clean(e);
-            if tex.len() < USERNAME_MIN_LEN || tex.len() > USERNAME_MAX_LEN {
-            return (StatusCode::BAD_REQUEST, 
-                    Json(json!({"status": 400, "message": "Display name not within 3 and 32 characters"})))
-                  .into_response();
-            }
-            tex
-        },
-        None => username.clone()
+    let display_name = payload.display_name.as_ref().map(|d| clean(&d.trim())).unwrap_or_else(||username.clone());
+    if display_name.len() < USERNAME_MIN_LEN || display_name.len() > USERNAME_MAX_LEN {
+    return (StatusCode::BAD_REQUEST, 
+            Json(json!({"status": 400, "message": "Display name not within 3 and 32 characters"})))
+            .into_response();
     };
 
     let salt = SaltString::generate(&mut OsRng);

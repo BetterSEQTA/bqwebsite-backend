@@ -36,3 +36,13 @@ pub struct Token {
     pub username: String,
     pub email: String
 }
+
+#[derive(Deserialize)]
+pub struct RegisterPayload {
+    pub email: String,
+    pub password: String,
+    pub username: String,
+    #[serde(default)]
+    #[serde(rename = "displayName")]
+    pub display_name: Option<String>,
+}
