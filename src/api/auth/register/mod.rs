@@ -4,8 +4,6 @@ use sqlx::{PgPool};
 use axum::{extract::State, http::{StatusCode}, response::{IntoResponse}, Json };
 use uuid::{Uuid};
 
-use serde_json::Value;
-
 use hmac::{Hmac, Mac};
 use argon2::{
     password_hash::{
