@@ -48,6 +48,7 @@ pub struct Token {
     pub sub: String,
     pub exp: usize,
     pub iat: usize,
+    pub email: String,
     pub username: String,
     pub provider: Provider,
     pub provider_id: String

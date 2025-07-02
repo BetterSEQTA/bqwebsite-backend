@@ -1,10 +1,14 @@
+// TODO CHANGE ALL OF THIS SO THAT SESSIONS HAVE THEIR OWN TABLE
+// CHANGE SQL QUERIES NEAR THE END.
+
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::{extract::{self, State}, http::StatusCode, response::{IntoResponse, Redirect}, Json};
+use axum::{extract::{self, State}, http::{StatusCode, HeaderMap, HeaderValue, Uri}, response::{IntoResponse, Redirect}, Json};
 use ::chrono::{DateTime, Duration, SecondsFormat, Utc};
 use sqlx::{postgres::PgRow, types::chrono, PgPool, Row};
 
-use reqwest::{header};
+use reqwest::{header, redirect::Policy};
 use url::Url;
 
 use serde_json::json;
@@ -12,11 +16,20 @@ use uuid::Uuid;
 
 use jsonwebtoken::{ Header, EncodingKey };
 
+
 use crate::{responses::throw_internal_server_error, types::{DiscordAccessTokenResponse, DiscordCallbackQuery, DiscordUser, Provider, Token}};
 
 pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): extract::Query<DiscordCallbackQuery>) -> impl IntoResponse {
     let query_state = query.state;
     let query_code = query.code;
+
+    let mut tx = match state.begin().await {
+        Ok(e) => e,
+        Err(e) => {
+            println!("Error creating transaction handler in OAUTH: {}", e);
+            return throw_internal_server_error().await;
+        }
+    };
 
     let client_id = match std::env::var("DISCORD_CLIENT_ID") {
         Ok(e) => e,
@@ -35,33 +48,69 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
 
     let db_state = sqlx::query(r#"
     SELECT created_at FROM state
-    WHERE state = $1;
+    WHERE state = $1
+    FOR UPDATE;
     "#)
     .bind(&query_state)
-    .fetch_optional(&state)
+    .fetch_optional(&mut *tx)
     .await;
-
-    let _ = sqlx::query(r#"
-        DELETE FROM state WHERE state = $1
-        "#
-    )
-        .bind(&query_state)
-        .execute(&state)
-        .await;
 
     let created_at: DateTime<Utc> = match &db_state {
         Ok(Some(record)) => record.get("created_at"),
-        Ok(None) => return (StatusCode::BAD_REQUEST, "Invalid state token").into_response(),
+        Ok(None) => {
+            let _ = match tx.rollback().await {
+                Ok(e) => e,
+                Err(e) => { 
+                    println!("Error rolling back transaction: {}", e); 
+                    return throw_internal_server_error().await; 
+                }
+            };
+            let _ = 
+            return (StatusCode::UNAUTHORIZED, "Invalid state token").into_response();
+        },
         Err(e) => {
             println!("Error getting creation date for state token in callback: {}", e);
+            let _ = match tx.rollback().await {
+                Ok(e) => e,
+                Err(e) => { 
+                    println!("Error rolling back transaction: {}", e); 
+                    return throw_internal_server_error().await; 
+                }
+            };
             return throw_internal_server_error().await;
         }
     };
 
     let now = chrono::Utc::now();
     if now.signed_duration_since(&created_at).num_minutes() > 15 {
-        return (StatusCode::BAD_REQUEST, "State token expired").into_response();
+        let _ = match tx.rollback().await {
+                Ok(e) => e,
+                Err(e) => { 
+                    println!("Error rolling back transaction: {}", e); 
+                    return throw_internal_server_error().await; 
+                }
+        };
+        return (StatusCode::UNAUTHORIZED, "State token expired").into_response();
     }
+
+    let _ = match sqlx::query(r#"DELETE FROM state WHERE state = $1"#)
+    .bind(&query_state)
+    .execute(&mut *tx)
+    .await {
+        Ok(e) => e,
+        Err(e) => {
+            println!("Error deleting valid state: {}", e);
+            return throw_internal_server_error().await;
+        }
+    };
+
+    let _ = match tx.commit().await {
+        Ok(e) => e,
+        Err(e) => {
+            println!("Error finalising Postgres transaction: {}", e);
+            return throw_internal_server_error().await;
+        }
+    };
 
     let redirect_uri = match std::env::var("REDIRECT_URI_DISCORD") {
         Ok(e) => e,
@@ -72,7 +121,13 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
     };
 
     let params = [("grant_type", "authorization_code"), ("code", &query_code), ("redirect_uri", &redirect_uri)];
-    let client = reqwest::Client::new();
+    let client = match reqwest::Client::builder().redirect(Policy::none()).build() {
+        Ok(e) => e,
+        Err(e) => {
+            println!("Error setting reqwest redirect policy: {}", e);
+            return throw_internal_server_error().await;
+        }
+    };
 
     let res_token = match client.post("https://discord.com/api/oauth2/token")
         .form(&params)
@@ -119,6 +174,11 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         return (StatusCode::BAD_REQUEST, Json(json!({"status": "400", "message": "Your Discord account doesn't have an email or isn't verified."}))).into_response();
     }
 
+    let email = match me_json.email {
+        Some(e) => e,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({"status": "400", "message": "Your Discord account doesn't have an email or isn't verified."}))).into_response(),
+    };
+
     if me_json.global_name.is_none() {
         me_json.global_name = Some(me_json.username.clone());
     }
@@ -136,17 +196,33 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         None => None, // treat as non-expiring, or set a conservative default
     };
 
+    let mut user_tx = match state.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            println!("Error creating transaction for user operations: {}", e);
+            return throw_internal_server_error().await;
+        }
+    };
+
     let userid: Uuid = match sqlx::query(r#"
     SELECT userid FROM users
     WHERE (email = $1) OR ("providerId" = $2)
+    FOR UPDATE;
     "#)
-    .bind(&me_json.email)
+    .bind(&email)
     .bind(&me_json.id)
-    .fetch_optional(&state)
+    .fetch_optional(&mut *user_tx)
     .await {
         Ok(Some(e)) => e.get("userid"),
         Ok(None) => uuid::Uuid::new_v4(),
         Err(e) => {
+            let _ = match user_tx.rollback().await {
+                Ok(e) => e,
+                Err(e) => { 
+                    println!("Error rolling back transaction: {}", e); 
+                    return throw_internal_server_error().await; 
+                }
+            };
             println!("Error getting UUID from SQL: {}", e);
             return throw_internal_server_error().await;
         }
@@ -164,7 +240,7 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         "providerId" = EXCLUDED."providerId";
     "#)
     .bind(&userid)
-    .bind(&me_json.email)
+    .bind(&email)
     .bind(&me_json.username)
     .bind(&me_json.global_name)
     .bind(&me_json.avatar)
@@ -174,13 +250,28 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
     .bind(&res_json.access_token)
     .bind(&res_json.refresh_token)
     .bind(&expires_at)
-    .execute(&state)
+    .execute(&mut *user_tx)
     .await {
         Ok(e) => e,
         Err(e) => {
             println!("Unable to create new user from Discord OAUTH: {}", e);
+            let _ = match user_tx.rollback().await {
+                Ok(e) => e,
+                Err(e) => { 
+                    println!("Error rolling back transaction: {}", e); 
+                    return throw_internal_server_error().await; 
+                }
+            };
             return throw_internal_server_error().await;
         } 
+    };
+
+    let _ = match user_tx.commit().await {
+        Ok(e) => e,
+        Err(e) => {
+            println!("Error finalising Postgres transaction: {}", e);
+            return throw_internal_server_error().await;
+        }
     };
 
     // JWT!!
@@ -190,6 +281,7 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         sub: userid.to_string(),
         exp: expiration as usize,
         iat: now.timestamp() as usize,
+        email: email,
         username: me_json.username,
         provider: provider,
         provider_id: me_json.id
@@ -211,8 +303,25 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         }
     };
 
+    let redirect_uri = match std::env::var("CALLBACK_URI_DISCORD") {
+        Ok(e) => e,
+        Err(_) => {
+            println!("Error getting callback URI");
+            return throw_internal_server_error().await;
+        }
+    };
 
-    let redirect_uri = format!("https://accounts.betterseqta.org/auth/discord/callback?token={}", token);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::SET_COOKIE, 
+        format!("auth_token={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800", token)
+            .parse()
+            .unwrap_or_else(|_| {
+                println!("Error parsing header value");
+                HeaderValue::from_static("")
+            })
+    );
+    headers.insert(header::LOCATION, redirect_uri.parse().unwrap());
 
-    Redirect::to(&redirect_uri).into_response()
+    (StatusCode::FOUND, headers, "").into_response()
 }
