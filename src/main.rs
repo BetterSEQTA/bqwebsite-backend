@@ -21,6 +21,8 @@ mod types;
 
 mod statics;
 
+mod middleware;
+
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 
 

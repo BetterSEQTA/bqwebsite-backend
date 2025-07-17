@@ -2,22 +2,21 @@
 // CHANGE SQL QUERIES NEAR THE END.
 
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use axum::{extract::{self, State}, http::{StatusCode, HeaderMap, HeaderValue, Uri}, response::{IntoResponse, Redirect}, Json};
-use ::chrono::{DateTime, Duration, SecondsFormat, Utc};
-use sqlx::{postgres::PgRow, types::chrono, PgPool, Row};
+use axum::{extract::{self, State, connect_info::{ConnectInfo, Connected}}, http::{StatusCode, HeaderMap, HeaderValue}, response::{IntoResponse}, Json};
+use ::chrono::{DateTime, Duration, Utc};
+use sqlx::{types::chrono, PgPool, Row};
 
 use reqwest::{header, redirect::Policy};
-use url::Url;
 
 use serde_json::json;
 use uuid::Uuid;
 
 use jsonwebtoken::{ Header, EncodingKey };
 
+use crate::statics::USERNAME_REGEX;
 
-use crate::{responses::throw_internal_server_error, types::{DiscordAccessTokenResponse, DiscordCallbackQuery, DiscordUser, Provider, Token}};
+
+use crate::{responses::throw_internal_server_error, types::{DiscordAccessTokenResponse, DiscordCallbackQuery, DiscordUser, Provider, Token, MyConnectionInfo}};
 
 pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): extract::Query<DiscordCallbackQuery>) -> impl IntoResponse {
     let query_state = query.state;
@@ -183,6 +182,10 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         me_json.global_name = Some(me_json.username.clone());
     }
 
+    if !USERNAME_REGEX.get().unwrap().is_match(&me_json.username) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"status": "400", "message": "Invalid username"}))).into_response()
+    }
+
     me_json.avatar = Some(match me_json.avatar {
         None => format!("https://api.dicebear.com/7.x/thumbs/svg?seed={}", me_json.id),
         Some(avatar) => format!("https://cdn.discordapp.com/avatars/{}/{}.png", me_json.id, avatar)
@@ -206,7 +209,7 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
 
     let userid: Uuid = match sqlx::query(r#"
     SELECT userid FROM users
-    WHERE (email = $1) OR ("providerId" = $2)
+    WHERE (email = $1)
     FOR UPDATE;
     "#)
     .bind(&email)
@@ -229,15 +232,9 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
     };
 
     let _ = match sqlx::query(r#"
-    INSERT INTO users (userid, email, username, "displayName", "pfpUrl", "createdAt", provider, "providerId", "accessToken", "refreshToken", "tokenExpiresAt")
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-    ON CONFLICT (email)
-    DO UPDATE SET
-        "accessToken" = EXCLUDED."accessToken",
-        "refreshToken" = EXCLUDED."refreshToken",
-        "tokenExpiresAt" = EXCLUDED."tokenExpiresAt",
-        provider = EXCLUDED.provider,
-        "providerId" = EXCLUDED."providerId";
+    INSERT INTO users (userid, email, username, "displayName", "pfpUrl", "createdAt")
+    VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT DO NOTHING;
     "#)
     .bind(&userid)
     .bind(&email)
@@ -245,11 +242,6 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
     .bind(&me_json.global_name)
     .bind(&me_json.avatar)
     .bind(&now)
-    .bind(&provider)
-    .bind(&me_json.id)
-    .bind(&res_json.access_token)
-    .bind(&res_json.refresh_token)
-    .bind(&expires_at)
     .execute(&mut *user_tx)
     .await {
         Ok(e) => e,
@@ -266,6 +258,31 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         } 
     };
 
+    let session_id = uuid::Uuid::new_v4();
+
+    let _ = match sqlx::query(r#"
+    INSERT INTO sessions (session_id, issued_at, expires_at, provider, provider_id, access_token, refresh_token, token_expires_at, user_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    ON CONFLICT DO NOTHING;
+    "#)
+    .bind(&session_id)
+    .bind(&now)
+    .bind(Utc::now() + Duration::minutes(44640))
+    .bind(&provider)
+    .bind(&me_json.id)
+    .bind(&res_json.access_token)
+    .bind(&res_json.refresh_token)
+    .bind(&expires_at)
+    .bind(&userid)
+    .execute(&mut *user_tx)
+    .await {
+        Ok(e) => e,
+        Err(e) => {
+            println!("Unable to create new session on DB: {}", e);
+            return throw_internal_server_error().await;
+        }
+    };
+
     let _ = match user_tx.commit().await {
         Ok(e) => e,
         Err(e) => {
@@ -276,15 +293,12 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
 
     // JWT!!
 
-    let expiration = now.timestamp() + 60 * 60 * 24 * 7; // Token valid for 7 days
+    let expiration = now.timestamp() + 60 * 60 * 24 * 31; // Token valid for 31 days
     let claims = Token {
-        sub: userid.to_string(),
+        sub: session_id.to_string(),
         exp: expiration as usize,
         iat: now.timestamp() as usize,
-        email: email,
-        username: me_json.username,
-        provider: provider,
-        provider_id: me_json.id
+        toktype: String::from("auth")
     };
 
     let key = match std::env::var("JWT_KEY") {

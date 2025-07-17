@@ -1,7 +1,9 @@
-use chrono::{DateTime, SecondsFormat, TimeDelta};
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use sqlx::types::chrono::Utc;
+
+use axum::{extract::connect_info::{Connected}, serve::IncomingStream};
+use tokio::net::TcpListener;
 
 #[derive(Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "provider", rename_all = "lowercase")]
@@ -48,10 +50,7 @@ pub struct Token {
     pub sub: String,
     pub exp: usize,
     pub iat: usize,
-    pub email: String,
-    pub username: String,
-    pub provider: Provider,
-    pub provider_id: String
+    pub toktype: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,4 +76,17 @@ pub struct DiscordUser {
     pub email: Option<String>,
     pub avatar: Option<String>,
     pub verified: bool
+}
+
+#[derive(Clone, Debug)]
+pub struct MyConnectionInfo {
+    pub ip: String
+}
+
+impl Connected<IncomingStream<'_, TcpListener>> for MyConnectionInfo {
+    fn connect_info(target: IncomingStream<'_, TcpListener>) -> Self {
+        MyConnectionInfo {
+            ip: target.remote_addr().to_string()
+        }
+    }
 }
