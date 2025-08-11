@@ -1,7 +1,5 @@
 use axum::{
-    routing::get,
-    routing::post,
-    Router,
+    handler::Handler, middleware, routing::{get, post}, Router
 };
 
 use tower::{ ServiceBuilder };
@@ -12,6 +10,8 @@ mod health;
 
 use sqlx::{postgres::PgPoolOptions};
 use std::env;
+
+use crate::middleware::{authorization_middleware};
 
 
 
@@ -27,7 +27,13 @@ pub async fn api_router() -> Router {
 
     Router::new()
         .route("/auth/logout", post(auth::logout))
-        .route("/auth/me", get(auth::me))
+        .route("/auth/me", get(auth::me)
+            .layer(ServiceBuilder::new()
+                .layer(
+                    middleware::from_fn(authorization_middleware)
+                )
+        )
+        )
         .route("/health", get(health::health))
         .route("/auth/oauth/discord", get(auth::oauth::discord::define_event_handler))
         .route("/auth/callback/discord", get(auth::callback::discord::exchange_code))

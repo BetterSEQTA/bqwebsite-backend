@@ -1,8 +1,4 @@
-// TODO CHANGE ALL OF THIS SO THAT SESSIONS HAVE THEIR OWN TABLE
-// CHANGE SQL QUERIES NEAR THE END.
-
-
-use axum::{extract::{self, State, connect_info::{ConnectInfo, Connected}}, http::{StatusCode, HeaderMap, HeaderValue}, response::{IntoResponse}, Json};
+use axum::{extract::{self, State}, http::{StatusCode, HeaderMap, HeaderValue}, response::{IntoResponse}, Json};
 use ::chrono::{DateTime, Duration, Utc};
 use sqlx::{types::chrono, PgPool, Row};
 
@@ -16,7 +12,7 @@ use jsonwebtoken::{ Header, EncodingKey };
 use crate::statics::USERNAME_REGEX;
 
 
-use crate::{responses::throw_internal_server_error, types::{DiscordAccessTokenResponse, DiscordCallbackQuery, DiscordUser, Provider, Token, MyConnectionInfo}};
+use crate::{responses::throw_internal_server_error, types::{DiscordAccessTokenResponse, DiscordCallbackQuery, DiscordUser, Provider, Token}};
 
 pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): extract::Query<DiscordCallbackQuery>) -> impl IntoResponse {
     let query_state = query.state;
@@ -213,7 +209,6 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
     FOR UPDATE;
     "#)
     .bind(&email)
-    .bind(&me_json.id)
     .fetch_optional(&mut *user_tx)
     .await {
         Ok(Some(e)) => e.get("userid"),
@@ -279,6 +274,13 @@ pub async fn exchange_code(State(state): State<PgPool>, extract::Query(query): e
         Ok(e) => e,
         Err(e) => {
             println!("Unable to create new session on DB: {}", e);
+            let _ = match user_tx.rollback().await {
+                Ok(e) => e,
+                Err(e) => { 
+                    println!("Error rolling back transaction: {}", e); 
+                    return throw_internal_server_error().await; 
+                }
+            };
             return throw_internal_server_error().await;
         }
     };

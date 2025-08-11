@@ -1,9 +1,7 @@
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use sqlx::types::chrono::Utc;
-
-use axum::{extract::connect_info::{Connected}, serve::IncomingStream};
-use tokio::net::TcpListener;
+use axum::http::StatusCode;
 
 #[derive(Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "provider", rename_all = "lowercase")]
@@ -13,6 +11,11 @@ pub enum Provider {
     Discord,
     Google,
     Microsoft
+}
+
+pub struct AuthError {
+    pub message: String,
+    pub status_code: StatusCode,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,7 +48,7 @@ pub struct User {
 
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Token {
     pub sub: String,
     pub exp: usize,
@@ -76,17 +79,4 @@ pub struct DiscordUser {
     pub email: Option<String>,
     pub avatar: Option<String>,
     pub verified: bool
-}
-
-#[derive(Clone, Debug)]
-pub struct MyConnectionInfo {
-    pub ip: String
-}
-
-impl Connected<IncomingStream<'_, TcpListener>> for MyConnectionInfo {
-    fn connect_info(target: IncomingStream<'_, TcpListener>) -> Self {
-        MyConnectionInfo {
-            ip: target.remote_addr().to_string()
-        }
-    }
 }
